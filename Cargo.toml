@@ -1,0 +1,11 @@
+[package]
+name = "fdname"
+version = "0.1.0"
+authors = ["cloudsickle <40519481+cloudsickle@users.noreply.github.com>"]
+edition = "2018"
+
+[dependencies]
+docopt = "1"
+serde = "1.0"
+serde_derive = "1.0"
+walkdir = "2.2.7"
