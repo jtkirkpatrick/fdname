@@ -11,13 +11,13 @@ use walkdir::WalkDir;
 #[derive(StructOpt)]
 #[structopt(name = "fdname", about = "File and Directory Renaming Tool")]
 pub struct Opt {
-    #[structopt(parse(from_os_str))]
+    #[structopt(parse(from_os_str), help = "Optional root directory.")]
     root_dir: Option<path::PathBuf>,
-    #[structopt(name = "dirs", long, short)]
+    #[structopt(name = "dirs", long, short, help = "Apply to directories.")]
     dirs: bool,
-    #[structopt(name = "files", long, short)]
+    #[structopt(name = "files", long, short, help = "Apply to files.")]
     files: bool,
-    #[structopt(name = "recursive", long, short)]
+    #[structopt(name = "recursive", long, short, help = "Apply to the tree.")]
     recursive: bool,
     #[structopt(subcommand)]
     cmd: Command,
@@ -26,11 +26,22 @@ pub struct Opt {
 #[derive(StructOpt)]
 enum Command {
     #[structopt(name = "prefix")]
-    Prefix { new: String },
+    Prefix {
+        #[structopt(help = "Add <new> to the front of every entry.")]
+        new: String,
+    },
     #[structopt(name = "suffix")]
-    Suffix { new: String },
+    Suffix {
+        #[structopt(help = "Add <new> to the end of every entry.")]
+        new: String,
+    },
     #[structopt(name = "replace")]
-    Replace { old: String, new: String },
+    Replace {
+        #[structopt(help = "Remove <old> from every entry.")]
+        old: String,
+        #[structopt(help = "Insert <new> where <old> was in each entry.")]
+        new: String,
+    },
 }
 
 pub fn run(mut opt: Opt) -> io::Result<()> {
