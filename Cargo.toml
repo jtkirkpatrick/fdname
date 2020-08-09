@@ -1,7 +1,7 @@
 [package]
 name = "fdname"
-version = "0.1.1"
-authors = ["jtkirkpatrick"]
+version = "0.1.6"
+authors = ["jtkirkpatrick", "zanayr"]
 edition = "2018"
 
 [dependencies]
