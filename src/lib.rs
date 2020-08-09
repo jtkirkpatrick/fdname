@@ -1,10 +1,7 @@
-extern crate structopt;
-extern crate walkdir;
-
-use std::env;
-use std::ffi;
-use std::io;
-use std::path;
+use std::{env, ffi, io};
+use std::path::{ Path, PathBuf };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{ Hash, Hasher };
 use structopt::StructOpt;
 use walkdir::WalkDir;
 
@@ -12,7 +9,7 @@ use walkdir::WalkDir;
 #[structopt(name = "fdname", about = "File and Directory Renaming Tool")]
 pub struct Opt {
     #[structopt(parse(from_os_str), help = "Optional root directory.")]
-    root_dir: Option<path::PathBuf>,
+    root_dir: Option<PathBuf>,
     #[structopt(name = "dirs", long, short, help = "Apply to directories.")]
     dirs: bool,
     #[structopt(name = "files", long, short, help = "Apply to files.")]
@@ -25,9 +22,25 @@ pub struct Opt {
 
 #[derive(StructOpt)]
 enum Command {
+    #[structopt(name="hash", help="Completely hash each name.")]
+    Hash {},
+    #[structopt(name="lowercase", help="Change name to all lowercase characters.")]
+    Lowercase {},
     #[structopt(name = "prefix")]
     Prefix {
         #[structopt(help = "Add <new> to the front of every entry.")]
+        new: String,
+    },
+    #[structopt(name="remove", help="Remove <sub> from names.")]
+    Remove {
+        #[structopt(help="Remove <sub> from names.")]
+        sub: String,
+    },
+    #[structopt(name = "replace")]
+    Replace {
+        #[structopt(help = "Remove <old> from every entry.")]
+        old: String,
+        #[structopt(help = "Insert <new> where <old> was in each entry. Leave blank to remove <old> only.")]
         new: String,
     },
     #[structopt(name = "suffix")]
@@ -35,13 +48,10 @@ enum Command {
         #[structopt(help = "Add <new> to the end of every entry.")]
         new: String,
     },
-    #[structopt(name = "replace")]
-    Replace {
-        #[structopt(help = "Remove <old> from every entry.")]
-        old: String,
-        #[structopt(help = "Insert <new> where <old> was in each entry.")]
-        new: String,
-    },
+    #[structopt(name="uppercase", help="Change name to all uppercase characters.")]
+    Uppercase {},
+    #[structopt(name="whitespace", help="Remove all white space in names.")]
+    Whitespace {},
 }
 
 pub fn run(mut opt: Opt) -> io::Result<()> {
@@ -52,10 +62,15 @@ pub fn run(mut opt: Opt) -> io::Result<()> {
         opt.files = true;
     }
 
-    let naming_function = |path: &path::Path| match &opt.cmd {
+    let naming_function = |path: &Path| match &opt.cmd {
+        Command::Hash {} => hash(path),
+        Command::Lowercase {} => lowercase(path),
         Command::Prefix { new } => prefix(path, &new),
-        Command::Suffix { new } => suffix(path, &new),
+        Command::Remove { sub } => remove(path, &sub),
         Command::Replace { old, new } => replace(path, &old, &new),
+        Command::Suffix { new } => suffix(path, &new),
+        Command::Uppercase {} => uppercase(path),
+        Command::Whitespace {} => whitespace(path),
     };
 
     let root = root_dir(&opt)?;
@@ -85,8 +100,8 @@ pub fn run(mut opt: Opt) -> io::Result<()> {
     Ok(())
 }
 
-fn root_dir(opt: &Opt) -> io::Result<(path::PathBuf)> {
-    let root: path::PathBuf = match &opt.root_dir {
+fn root_dir(opt: &Opt) -> io::Result<PathBuf> {
+    let root: PathBuf = match &opt.root_dir {
         Some(path) => path.clone(),
         None => env::current_dir()?,
     };
@@ -98,7 +113,7 @@ fn root_dir(opt: &Opt) -> io::Result<(path::PathBuf)> {
     }
 }
 
-fn stem_ext(path: &path::Path) -> Option<(ffi::OsString, ffi::OsString)> {
+fn stem_ext(path: &Path) -> Option<(ffi::OsString, ffi::OsString)> {
     let stem: &ffi::OsStr = match path.file_stem() {
         Some(stem) => stem,
         None => return None,
@@ -112,7 +127,35 @@ fn stem_ext(path: &path::Path) -> Option<(ffi::OsString, ffi::OsString)> {
     Some((stem.to_os_string(), ext.to_os_string()))
 }
 
-fn prefix(path: &path::Path, prefix: &str) -> io::Result<()> {
+fn hash(path: &Path) -> io::Result<()> {
+    let (stem, ext) = match stem_ext(path) {
+        Some((stem, ext)) => (stem, ext),
+        None => return Ok(()),
+    };
+    
+    let mut hasher = DefaultHasher::new();
+    stem.hash(&mut hasher);
+
+    let name = hasher.finish();
+    let name = ffi::OsString::from(name.to_string());
+    let name = name.as_os_str();
+
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
+}
+
+fn lowercase(path: &Path) -> io::Result<()> {
+    let (stem, ext) = match stem_ext(path) {
+        Some((stem, ext)) => (stem, ext),
+        None => return Ok(()),
+    };
+
+    let name: String = stem.into_string().unwrap().to_lowercase();
+    let name = Path::new(&name[..]).file_stem().unwrap();
+
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
+}
+
+fn prefix(path: &Path, prefix: &str) -> io::Result<()> {
     let (stem, ext) = match stem_ext(path) {
         Some((stem, ext)) => (stem, ext),
         None => return Ok(()),
@@ -122,29 +165,24 @@ fn prefix(path: &path::Path, prefix: &str) -> io::Result<()> {
     name.push(stem);
     let name = name.as_os_str();
 
-    std::fs::rename(
-        path,
-        path.with_file_name(name).with_extension(ext).as_path(),
-    )
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
 }
 
-fn suffix(path: &path::Path, suffix: &str) -> io::Result<()> {
+fn remove(path: &Path, sub: &str) -> io::Result<()> {
     let (stem, ext) = match stem_ext(path) {
         Some((stem, ext)) => (stem, ext),
         None => return Ok(()),
     };
 
-    let mut name = ffi::OsString::from(stem);
-    name.push(suffix);
+    let name = stem.to_string_lossy();
+    let name = name.replace(sub, "");
+    let name = ffi::OsString::from(name);
     let name = name.as_os_str();
 
-    std::fs::rename(
-        path,
-        path.with_file_name(name).with_extension(ext).as_path(),
-    )
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
 }
 
-fn replace(path: &path::Path, old: &str, new: &str) -> io::Result<()> {
+fn replace(path: &Path, old: &str, new: &str) -> io::Result<()> {
     let (stem, ext) = match stem_ext(path) {
         Some((stem, ext)) => (stem, ext),
         None => return Ok(()),
@@ -155,8 +193,42 @@ fn replace(path: &path::Path, old: &str, new: &str) -> io::Result<()> {
     let name = ffi::OsString::from(name);
     let name = name.as_os_str();
 
-    std::fs::rename(
-        path,
-        path.with_file_name(name).with_extension(ext).as_path(),
-    )
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
+}
+
+fn suffix(path: &Path, suffix: &str) -> io::Result<()> {
+    let (stem, ext) = match stem_ext(path) {
+        Some((stem, ext)) => (stem, ext),
+        None => return Ok(()),
+    };
+
+    let mut name = ffi::OsString::from(stem);
+    name.push(suffix);
+    let name = name.as_os_str();
+
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
+}
+
+fn uppercase(path: &Path) -> io::Result<()> {
+    let (stem, ext) = match stem_ext(path) {
+        Some((stem, ext)) => (stem, ext),
+        None => return Ok(()),
+    };
+
+    let name: String = stem.into_string().unwrap().to_uppercase();
+    let name = Path::new(&name[..]).file_stem().unwrap();
+
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
+}
+
+fn whitespace(path: &Path) -> io::Result<()> {
+    let (stem, ext) = match stem_ext(path) {
+        Some((stem, ext)) => (stem, ext),
+        None => return Ok(()),
+    };
+
+    let name: String = stem.into_string().unwrap().chars().filter(|c| !c.is_whitespace()).collect();
+    let name = Path::new(&name[..]).file_stem().unwrap();
+
+    std::fs::rename(path, path.with_file_name(name).with_extension(ext).as_path())
 }
